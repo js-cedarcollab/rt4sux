@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Route 4 Reliability</title>
+<meta name="description" content="Does King County Metro Route 4 run the trips it publishes? Scheduled versus observed trips at two Queen Anne stops.">
+<style>
+  :root {
+    --bg: #f6f5f1; --card: #ffffff; --ink: #1c1b19; --muted: #6a675f; --line: #e2dfd6;
+    --accent: #1d4ed8; --accent-ink: #ffffff;
+    --ok: #166534; --ok-bg: #dcfce7; --warn: #92400e; --warn-bg: #fef3c7;
+    --bad: #991b1b; --bad-bg: #fee2e2; --mute-bg: #ececE6; --info: #1e40af; --info-bg: #dbeafe;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #151513; --card: #1f1f1c; --ink: #efede6; --muted: #a09d93; --line: #34332e;
+      --accent: #6e9bff; --accent-ink: #0c1a3a;
+      --ok: #86efac; --ok-bg: #12301c; --warn: #fcd34d; --warn-bg: #3a2a0c;
+      --bad: #fca5a5; --bad-bg: #3d1616; --mute-bg: #2a2a26; --info: #93c5fd; --info-bg: #14274a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #151513; --card: #1f1f1c; --ink: #efede6; --muted: #a09d93; --line: #34332e;
+    --accent: #6e9bff; --accent-ink: #0c1a3a;
+    --ok: #86efac; --ok-bg: #12301c; --warn: #fcd34d; --warn-bg: #3a2a0c;
+    --bad: #fca5a5; --bad-bg: #3d1616; --mute-bg: #2a2a26; --info: #93c5fd; --info-bg: #14274a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.6rem; margin: 8px 0 2px; line-height: 1.2; }
+  h2 { font-size: 1.15rem; margin: 0 0 10px; }
+  p { margin: 0 0 10px; }
+  .sub { color: var(--muted); margin-bottom: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 14px 0; }
+  .muted { color: var(--muted); font-size: .9rem; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .grow { flex: 1 1 auto; }
+  button, select, input, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; border: 1px solid var(--line); background: var(--card); border-radius: 10px; padding: 10px 14px; min-height: 44px; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button.big { width: 100%; font-size: 1.1rem; padding: 14px; }
+  button:disabled { opacity: .6; cursor: default; }
+  select, input, textarea { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); min-height: 44px; }
+  label { display: block; font-weight: 600; margin: 12px 0 4px; }
+  .chip { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: .82rem; font-weight: 600; white-space: nowrap; }
+  .chip.on_time { color: var(--ok); background: var(--ok-bg); }
+  .chip.late, .chip.early { color: var(--warn); background: var(--warn-bg); }
+  .chip.not_observed, .chip.no_realtime { color: var(--bad); background: var(--bad-bg); }
+  .chip.unknown, .chip.pending { color: var(--muted); background: var(--mute-bg); }
+  .chip.rider { color: var(--info); background: var(--info-bg); }
+  .pill { display: inline-flex; gap: 6px; align-items: center; font-size: .85rem; padding: 4px 10px; border-radius: 999px; background: var(--mute-bg); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .dot.ok { background: #16a34a; } .dot.bad { background: #dc2626; } .dot.idle { background: #9ca3af; }
+  .trip { display: grid; grid-template-columns: 4.6rem 1fr auto; gap: 8px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); cursor: pointer; }
+  .trip:first-of-type { border-top: 0; }
+  .trip .t { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .trip .d { font-size: .9rem; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+  th, td { text-align: left; padding: 7px 6px; border-top: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; color: var(--muted); border-top: 0; font-size: .82rem; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .scroll { overflow-x: auto; }
+  dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--ink); width: min(92vw, 460px); padding: 18px; }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  .opts { display: grid; gap: 8px; }
+  .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+  .banner { padding: 10px 12px; border-radius: 10px; margin: 10px 0; font-size: .95rem; }
+  .banner.bad { background: var(--bad-bg); color: var(--bad); }
+  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 10px; z-index: 20; max-width: 90vw; }
+  footer { color: var(--muted); font-size: .85rem; margin: 20px 0 40px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Is Route 4 actually running?</h1>
+  <p class="sub">Scheduled versus observed buses at two Queen Anne stops, on weekday commutes. Independent of King County Metro.</p>
+  <div id="health-pill" class="pill"><span class="dot"></span><span>Checking…</span></div>
+  <div id="stalled" class="banner bad" hidden></div>
+  <div id="load-error" class="banner bad" hidden></div>
+
+  <section class="card" id="giveup-card">
+    <h2>Gave up waiting?</h2>
+    <p class="muted">One tap logs it. This counts how often the bus fails badly enough that Lauren gives up on it.</p>
+    <label for="gu-stop">Stop</label>
+    <select id="gu-stop"></select>
+    <p></p>
+    <button class="primary big" id="gu-btn">I gave up on the bus</button>
+    <p class="muted" id="gu-count" style="margin-top:10px"></p>
+  </section>
+
+  <section class="card"><h2>Today</h2><div id="today"></div>
+    <p class="muted">Tap any trip to report what actually happened.</p></section>
+
+  <section class="card"><h2>Last <span class="days">14</span> days</h2><div id="summary"></div></section>
+  <section class="card"><h2>Longest waits</h2><div id="worst"></div></section>
+  <section class="card"><h2>Rider reports</h2><div id="reports"></div>
+    <p><button id="report-btn">Report a trip</button></p></section>
+  <section class="card"><h2>Data quality</h2><div id="quality"></div></section>
+
+  <section class="card"><h2>How this works</h2>
+    <p><b>Observed</b> means the bus appeared in Metro's real-time feed. We record each scheduled trip's predicted arrival at the stop; the <i>last prediction seen before the bus left the feed</i> is our stand-in for the actual arrival time. It is a proxy, not an exact GPS timestamp.</p>
+    <p><b>Thresholds:</b> early if more than <span id="th-early">1</span> minute ahead of schedule; late if more than <span id="th-late">5</span> minutes behind. A trip is final <span id="th-grace">30</span> minutes after its scheduled time. Placeholder thresholds, not Metro's official definition.</p>
+    <p><b>"No bus observed"</b> means a bus may not have run <i>or</i> Metro's tracking feed had a gap. Real-time data near the start of a route has a history of gaps, and these stops are near the start. It does not prove a trip was canceled.</p>
+    <p><b>"Not monitored"</b> means our own polling had a hole around that trip. Those are never counted against Metro.</p>
+    <p><b>Schedule:</b> only weekday commute windows are watched (about 7:30-9:30 AM and 4-6 PM). Trips outside those windows and weekends are not tracked.</p>
+  </section>
+
+  <footer>Transit scheduling, geographic, and real-time data provided by permission of King County. Not affiliated with King County Metro.</footer>
+</main>
+
+<dialog id="dlg">
+  <form method="dialog" id="dlg-form"></form>
+</dialog>
+<div id="toast" class="toast" hidden></div>
+
+<script>
+const SUPABASE_URL = "https://menpsabenhaosvkcwgvk.supabase.co";
+const PUBLISHABLE_KEY = "sb_publishable_bjpwGi3RflEOi-HTwMMywg_-faxBMQd";
+const TZ = "America/Los_Angeles";
+const $ = (id) => document.getElementById(id);
+let DATA = null;
+
+const STATUS = {
+  on_time: "On time", late: "Late", early: "Early", no_realtime: "No bus observed",
+  not_observed: "No bus observed", unknown: "Not monitored", pending: "Upcoming",
+};
+const WHAT = {
+  on_time: "Bus came on time", late: "Bus came late", never_came: "Bus never came",
+  bypassed_or_full: "Bus bypassed or full", other: "Other", gave_up: "Gave up on the bus",
+};
+const ALT = { walked: "walked", drove: "drove", rideshare: "took a rideshare", other_route: "took another route", other: "did something else" };
+
+function el(tag, attrs, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") n.className = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v != null && v !== false) n.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  return n;
+}
+const fmtTime = (iso) => iso ? new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" }).format(new Date(iso)) : "";
+const fmtDay = (d) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" }).format(new Date(d + "T12:00:00Z"));
+const fmtDateTime = (iso) => new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short", hour: "numeric", minute: "2-digit" }).format(new Date(iso));
+const pct = (a, b) => (b ? Math.round((100 * a) / b) + "%" : "–");
+const chip = (cls, text) => el("span", { class: "chip " + cls }, text);
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.hidden = false;
+  clearTimeout(toast.h); toast.h = setTimeout(() => (t.hidden = true), 3500);
+}
+
+async function load() {
+  try {
+    const r = await fetch(SUPABASE_URL + "/rest/v1/rpc/public_dashboard", {
+      method: "POST",
+      headers: { apikey: PUBLISHABLE_KEY, Authorization: "Bearer " + PUBLISHABLE_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_days: 14 }),
+    });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    DATA = await r.json();
+    $("load-error").hidden = true;
+    render();
+  } catch (e) {
+    $("load-error").hidden = false;
+    $("load-error").textContent = "Couldn't load data (" + e.message + "). Will retry.";
+  }
+}
+
+function render() {
+  const d = DATA;
+  document.querySelectorAll(".days").forEach((n) => (n.textContent = d.days));
+  $("th-early").textContent = d.thresholds.early_min;
+  $("th-late").textContent = d.thresholds.late_min;
+  $("th-grace").textContent = d.thresholds.grace_min;
+  renderHealth(); renderGiveup(); renderToday(); renderSummary(); renderWorst(); renderReports(); renderQuality();
+}
+
+function renderHealth() {
+  const h = DATA.health, pill = $("health-pill"), s = $("stalled");
+  const dot = pill.querySelector(".dot"), txt = pill.children[1];
+  if (h.stalled) { dot.className = "dot bad"; txt.textContent = "Tracker is behind: last check " + Math.round(h.minutes_since_last_poll) + " min ago"; }
+  else if (h.in_poll_window) { dot.className = "dot ok"; txt.textContent = "Tracking live, checked " + Math.max(0, Math.round(h.minutes_since_last_poll)) + " min ago"; }
+  else { dot.className = "dot idle"; txt.textContent = "Between commute windows (tracking pauses)"; }
+  s.hidden = !h.stalled;
+  if (h.stalled) s.textContent = "Our tracker has not checked Metro's feed recently. Trips during this gap will show as 'Not monitored', not as missed buses.";
+}
+
+function stopOptions(sel) {
+  sel.replaceChildren(...DATA.today.map((s) => el("option", { value: s.stop_id }, s.name + " (" + (s.role === "boarding_am" ? "morning" : "evening") + ")")));
+}
+function defaultStop() {
+  const hr = Number(new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", hour12: false }).format(new Date()));
+  const want = hr < 13 ? "boarding_am" : "boarding_pm";
+  return (DATA.today.find((s) => s.role === want) || DATA.today[0] || {}).stop_id;
+}
+function renderGiveup() {
+  const sel = $("gu-stop"), cur = sel.value;
+  stopOptions(sel); sel.value = cur || defaultStop();
+  const total = DATA.giveups.reduce((a, g) => a + g.gave_up, 0);
+  const days = DATA.giveups.reduce((a, g) => a + g.days_with_giveup, 0);
+  $("gu-count").textContent = total ? "Gave up " + total + " time" + (total === 1 ? "" : "s") + " in the last " + DATA.days + " days (" + days + " commute" + (days === 1 ? "" : "s") + ")." : "No give-ups logged in the last " + DATA.days + " days.";
+}
+
+function renderToday() {
+  const box = $("today"); box.replaceChildren();
+  if (!DATA.today.length) { box.append(el("p", { class: "muted" }, "No stops configured.")); return; }
+  for (const s of DATA.today) {
+    box.append(el("h3", { style: "margin:14px 0 4px;font-size:1rem" }, s.name,
+      el("span", { class: "muted" }, "  " + (s.role === "boarding_am" ? "morning, toward downtown" : "evening, toward Queen Anne"))));
+    if (!s.trips.length) { box.append(el("p", { class: "muted" }, "No commute trips to watch today (weekends are not tracked).")); continue; }
+    for (const t of s.trips) {
+      const detail = t.status === "pending"
+        ? (t.has_rt && t.predicted ? "Expected " + fmtTime(t.predicted) + (t.delay_min != null ? " (" + (t.delay_min >= 0 ? "+" : "") + t.delay_min + " min)" : "") : t.last_seen ? "Listed, no live tracking yet" : "Not seen yet")
+        : t.status === "unknown" ? "Our tracker wasn't running"
+        : t.predicted && t.has_rt ? "Arrived about " + fmtTime(t.predicted) + (t.delay_min != null ? " (" + (t.delay_min >= 0 ? "+" : "") + t.delay_min + " min)" : "")
+        : t.status === "no_realtime" ? "Listed but never tracked live" : "Never appeared in feed";
+      const row = el("div", { class: "trip", role: "button", tabindex: "0", onclick: () => openReport(s.stop_id, t.scheduled), onkeydown: (e) => { if (e.key === "Enter") openReport(s.stop_id, t.scheduled); } },
+        el("div", { class: "t" }, fmtTime(t.scheduled)),
+        el("div", {}, el("div", { class: "d" }, detail),
+          t.reports.length ? el("div", {}, t.reports.map((r) => el("span", { class: "chip rider", style: "margin:2px 4px 0 0" }, "Rider: " + (WHAT[r.what] || r.what) + (r.minutes_waited != null ? ", " + r.minutes_waited + " min" : "")))) : null),
+        chip(t.status, STATUS[t.status]));
+      box.append(row);
+    }
+  }
+}
+
+function renderSummary() {
+  const box = $("summary"); box.replaceChildren();
+  if (!DATA.stops.length) { box.append(el("p", { class: "muted" }, "No finished trips yet. Tracking starts with the first commute window.")); return; }
+  const rows = DATA.stops.map((s) => el("tr", {},
+    el("td", {}, s.name),
+    el("td", { class: "n" }, pct(s.seen, s.known)), el("td", { class: "n" }, pct(s.on_time, s.known)),
+    el("td", { class: "n" }, s.no_bus), el("td", { class: "n" }, s.unknown),
+    el("td", { class: "n" }, s.longest_gap_min != null ? Math.round(s.longest_gap_min) + " min" : "–")));
+  box.append(el("div", { class: "scroll" }, el("table", {},
+    el("thead", {}, el("tr", {}, el("th", {}, "Stop"), el("th", { class: "n" }, "Bus seen"), el("th", { class: "n" }, "On time"), el("th", { class: "n" }, "No bus observed"), el("th", { class: "n" }, "Not monitored"), el("th", { class: "n" }, "Longest wait"))),
+    el("tbody", {}, rows))));
+  const gaps = DATA.stops.filter((s) => s.median_gap_min != null).map((s) =>
+    s.name + ": scheduled about every " + Math.round(s.median_sched_gap_min) + " min; buses actually seen median " + Math.round(s.median_gap_min) + " min apart, 90th percentile " + Math.round(s.p90_gap_min) + " min.");
+  gaps.forEach((g) => box.append(el("p", { class: "muted", style: "margin-top:8px" }, g)));
+}
+
+function renderWorst() {
+  const box = $("worst"); box.replaceChildren();
+  const rows = DATA.daily.filter((x) => x.longest_gap_min != null).slice(0, 5);
+  if (!rows.length) { box.append(el("p", { class: "muted" }, "Not enough finished days yet.")); return; }
+  box.append(el("div", { class: "scroll" }, el("table", {},
+    el("thead", {}, el("tr", {}, el("th", {}, "Day"), el("th", {}, "Stop"), el("th", { class: "n" }, "Longest wait"), el("th", { class: "n" }, "No bus observed"))),
+    el("tbody", {}, rows.map((x) => el("tr", {}, el("td", {}, fmtDay(x.service_date)), el("td", {}, x.name), el("td", { class: "n" }, Math.round(x.longest_gap_min) + " min"), el("td", { class: "n" }, x.no_bus)))))));
+}
+
+function renderReports() {
+  const box = $("reports"); box.replaceChildren();
+  if (!DATA.reports.length) { box.append(el("p", { class: "muted" }, "No reports yet.")); return; }
+  box.append(el("div", { class: "scroll" }, el("table", {}, el("tbody", {}, DATA.reports.map((r) => el("tr", {},
+    el("td", {}, fmtDateTime(r.reported_at)), el("td", {}, r.name),
+    el("td", {}, (WHAT[r.what] || r.what) + (r.alternative ? " (" + ALT[r.alternative] + ")" : "") + (r.minutes_waited != null ? ", waited " + r.minutes_waited + " min" : ""))))))));
+}
+
+function renderQuality() {
+  const h = DATA.health, box = $("quality"); box.replaceChildren();
+  const rate = h.polls ? ((100 * h.polls_ok) / h.polls).toFixed(1) + "%" : "–";
+  box.append(el("p", {}, "Feed checks succeeded: ", el("b", {}, rate), h.polls ? " (" + h.polls_ok + " of " + h.polls + ")" : ""));
+  box.append(el("p", {}, "Last check: ", el("b", {}, h.last_poll_at ? fmtDateTime(h.last_poll_at) : "none yet")));
+  if (h.missed_dispatches > 0) box.append(el("p", { class: "muted" }, h.missed_dispatches + " scheduled check(s) did not run."));
+  if (h.recent_failures.length) box.append(el("div", {}, el("p", { class: "muted" }, "Recent failed checks:"), el("ul", {}, h.recent_failures.map((f) => el("li", { class: "muted" }, fmtDateTime(f.at) + ": " + (f.error || "error"))))));
+  else box.append(el("p", { class: "muted" }, "No failed checks in the last " + DATA.days + " days."));
+}
+
+// ---- Dialogs ----
+function openDialog(nodes) { $("dlg-form").replaceChildren(...nodes); const d = $("dlg"); if (!d.open) d.showModal(); }
+function closeDialog() { $("dlg").close(); }
+
+async function submit(payload, btn) {
+  btn && (btn.disabled = true);
+  try {
+    const r = await fetch(SUPABASE_URL + "/functions/v1/submit-report", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+    closeDialog(); toast("Logged. Thanks."); load();
+  } catch (e) { toast("Could not save: " + e.message); btn && (btn.disabled = false); }
+}
+
+$("gu-btn").addEventListener("click", () => {
+  const stop = $("gu-stop").value;
+  const name = (DATA.today.find((s) => s.stop_id === stop) || {}).name || "this stop";
+  openDialog([
+    el("h2", {}, "Gave up at " + name),
+    el("p", { class: "muted" }, "What did you do instead?"),
+    el("div", { class: "opts" }, Object.entries(ALT).map(([k, v]) =>
+      el("button", { type: "button", class: "big", onclick: (e) => submit({ stop_id: stop, what_happened: "gave_up", alternative: k, website: "" }, e.target) }, v[0].toUpperCase() + v.slice(1)))),
+    el("p", {}, el("button", { type: "button", onclick: closeDialog }, "Cancel")),
+  ]);
+});
+
+function openReport(stopId, scheduled) {
+  const stop = stopId || defaultStop();
+  const s = DATA.today.find((x) => x.stop_id === stop);
+  const stopSel = el("select", { id: "r-stop" }); stopOptions(stopSel); stopSel.value = stop;
+  const timeSel = el("select", { id: "r-time" });
+  const fillTimes = () => {
+    const cur = DATA.today.find((x) => x.stop_id === stopSel.value);
+    timeSel.replaceChildren(el("option", { value: "" }, "Not sure / not listed"), ...(cur ? cur.trips.map((t) => el("option", { value: t.scheduled }, fmtTime(t.scheduled))) : []));
+    if (scheduled && cur && cur.stop_id === stop) timeSel.value = scheduled;
+  };
+  stopSel.addEventListener("change", () => { scheduled = null; fillTimes(); }); fillTimes();
+  const what = el("select", { id: "r-what" }, Object.entries(WHAT).filter(([k]) => k !== "gave_up").map(([k, v]) => el("option", { value: k }, v)));
+  const mins = el("input", { id: "r-min", type: "number", min: "0", max: "240", inputmode: "numeric", placeholder: "optional" });
+  const note = el("textarea", { id: "r-note", rows: "2", maxlength: "500", placeholder: "optional (not shown publicly)" });
+  const hp = el("div", { class: "hp", "aria-hidden": "true" }, el("input", { id: "r-hp", tabindex: "-1", autocomplete: "off", name: "website" }));
+  openDialog([
+    el("h2", {}, "Report a trip"),
+    el("label", { for: "r-stop" }, "Stop"), stopSel,
+    el("label", { for: "r-time" }, "Scheduled time"), timeSel,
+    el("label", { for: "r-what" }, "What happened?"), what,
+    el("label", { for: "r-min" }, "Minutes waited"), mins,
+    el("label", { for: "r-note" }, "Note"), note, hp,
+    el("p", {}),
+    el("div", { class: "row" },
+      el("button", { type: "button", class: "primary grow", onclick: (e) => submit({
+        stop_id: stopSel.value, scheduled_time: timeSel.value || null, what_happened: what.value,
+        minutes_waited: mins.value === "" ? null : Number(mins.value), note: note.value, website: $("r-hp").value }, e.target) }, "Submit"),
+      el("button", { type: "button", onclick: closeDialog }, "Cancel")),
+  ]);
+}
+$("report-btn").addEventListener("click", () => openReport());
+
+load();
+setInterval(() => { if (!document.hidden) load(); }, 60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+</script>
+</body>
+</html>
